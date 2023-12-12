@@ -1,0 +1,355 @@
+---
+title: "Alcohol Sales- DATA6530"
+author: "Meabh Hartney"
+date: "Spring 2023 - DATA 6530 Statistics & Forecasting"
+output:
+  word_document:
+  html_document:
+     df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE, warning=FALSE)
+library(fpp3)
+```
+
+```{r}
+getwd()
+Sys.time()
+```
+
+```{r}
+alcoholsales <- readxl::read_excel("data/AlcoholSales.xlsx") 
+```
+
+```{r}
+alcoholsales
+```
+
+```{r}
+alc <- alcoholsales %>% 
+  mutate(Quarter = yearquarter(Date)) %>% 
+  as_tsibble(index = Quarter) 
+```
+
+```{r}
+alc
+```
+
+```{r}
+alc %>% 
+  filter(year(Quarter) <= 2019) -> alc_train 
+```
+
+```{r}
+alc_train
+```
+
+```{r}
+alc %>% 
+  filter(year(Quarter) >= 2020) -> alc_test 
+```
+
+```{r}
+alc_test
+```
+
+```{r}
+alc %>% 
+  autoplot(Sales)
+```
+```{r}
+alc %>% 
+  autoplot(GDP)
+```
+```{r}
+alc %>% 
+  autoplot(CPI)
+```
+
+
+```{r}
+alc %>% 
+  autoplot(Sales) + labs(y = "Sales") + 
+geom_ribbon(aes(xmin = 18200, xmax = 18900), fill = "pink", alpha = 0.4) +
+   annotate("text", x = 18500, y = 2000, label = "Covid-19 Pandemic", col = "red", size = 3)
+
+#geom_ribbon(aes(xmin = 1979.98, xmax = 1989.13), fill = "pink", alpha = 0.4) +
+  #annotate("text", x = 1984.5, y = 10, label = "Soviet-Afghan War", col = "red", size = 3)
+```
+
+```{r}
+alc %>% 
+  autoplot(GDP) + labs(y = "GDP") + 
+geom_ribbon(aes(xmin = 18200, xmax = 18900), fill = "pink", alpha = 0.4) +
+   annotate("text", x = 18500, y = 2000, label = "Covid-19 Pandemic", col = "red", size = 3)
+```
+
+
+
+```{r}
+alc %>% 
+features(Sales, guerrero)
+```
+> As lamba is very close to 0, a log transformation of the data would be best 
+
+```{r}
+alc %>%
+  autoplot(log(Sales))
+```
+
+
+
+```{r}
+alc_fit <- alc_train %>%
+  model(
+    Mean = MEAN(log(Sales)),
+    `Naïve` = NAIVE(log(Sales)),
+    `Seasonal naïve` = SNAIVE(log(Sales)),
+    Drift = RW(log(Sales) ~ drift())
+    )
+```
+
+```{r}
+alc_fc <- alc_fit %>% 
+  forecast(alc_test)
+```
+
+```{r}
+alc_fc %>% 
+  autoplot(alc, 
+      level = NULL
+  ) +
+  labs(
+    y = "$ (millions)",
+    title = "Forecasts for quarterly sales"
+  ) +
+  guides(colour = guide_legend(title = "Forecast"))      
+```
+
+```{r}
+accuracy(alc_fit)
+```
+
+```{r}
+accuracy(alc_fc, alc)
+```
+
+> 3. Time Series Regression Models using the train data (1992-2016)
+
+```{r}
+reg_model0 <- alc_train %>% 
+  model(TSLM(log(Sales) ~ trend() + season() + GDP + CPI))
+report(reg_model0)
+```
+
+```{r}
+reg_model1 <- alc_train %>% 
+  model(TSLM(log(Sales) ~ season() + GDP+ CPI))
+report(reg_model1)
+```
+
+```{r}
+fc0 <- forecast(reg_model0,alc_test) 
+fc0 %>% 
+  autoplot(alc)
+```
+
+```{r}
+accuracy(reg_model0)
+accuracy(fc0, alc)
+```
+
+
+```{r}
+accuracy(reg_model1)
+accuracy(fc0, alc)
+```
+
+
+```{r}
+fc1 <- forecast(reg_model1,alc_test) 
+fc1 %>% 
+  autoplot(alc)
+```
+
+```{r}
+accuracy(reg_model1)
+accuracy(fc1, alc)
+```
+
+
+```{r}
+alc_train %>% 
+  autoplot(Sales, col = "blue") +
+  geom_line(data = augment(reg_model0), aes(y = .fitted), col = "red") + labs(title = "Regression Model using trend, season, GDP and CPI (reg_model0)")
+```
+
+```{r}
+alc_train %>% 
+  autoplot(Sales, col = "blue") +
+  geom_line(data = augment(reg_model1), aes(y = .fitted), col = "red") + labs(title = "Regression Model using  season, GDP and CPI (reg_model1)")
+```
+
+
+```{r}
+alc %>% 
+  autoplot(log(Sales))
+```
+
+
+```{r}
+alc %>% 
+  features(Sales,unitroot_kpss)
+```
+> Small P value, differencing is required 
+
+```{r}
+alc %>% 
+  features(Sales, unitroot_ndiffs)
+```
+
+```{r}
+alc %>% 
+features(Sales, unitroot_nsdiffs)
+```
+
+```{r}
+alc_train %>% 
+  autoplot(log(Sales) %>% difference())
+```
+
+```{r}
+alc %>% 
+  gg_tsdisplay(difference(log(Sales),4), plot_type='partial', lag = 36) +
+  labs(title = "Quarterly sales with differencing", y="")
+  
+```
+
+
+> ARIMA models 
+
+
+```{r}
+fit1 <- alc_train %>%
+  model(
+    arima011210 = ARIMA(Sales ~ pdq(0,1,1) + PDQ(0,1,1)),
+    arima012110 = ARIMA(Sales ~ pdq(0,1,2) + PDQ(0,1,0)),
+auto = ARIMA(Sales, stepwise = FALSE, approx = FALSE)
+)
+fit1 %>% pivot_longer(everything(), names_to = "Model name",
+                     values_to = "Orders")
+```
+
+
+```{r}
+glance(fit1) %>% arrange(AICc) %>% select(.model:BIC)
+```
+
+```{r}
+fc5 <- forecast(fit1,alc_test) 
+accuracy(fit1)
+accuracy(fc5, alc)
+```
+
+
+```{r}
+forecast(fit1, alc_test) %>%
+  autoplot(alc) +
+  labs(title = "Forecasting quarterly sales with ARIMA models",
+       y="$ million")
+```
+
+
+```{r}
+forecast(fit1, alc_test) %>%
+  filter(.model=='auto') %>%
+  autoplot(alc) +
+  labs(title = "Forecasting quarterly sales with auto ARIMA model",
+       y="$ million")
+```
+
+
+> ETS model 
+
+
+```{r}
+fit_ets <-alc %>% 
+model(
+    SES = ETS(log(Sales) ~ error("A") + trend("N") + season("N")),
+    Holt = ETS(log(Sales) ~ error("A") + trend("A") + season("N")),
+    Damped = ETS(log(Sales) ~ error("A") + trend("Ad") + season("N")),
+    auto = ETS(log(Sales))
+)
+
+accuracy(fit_ets) 
+```
+
+```{r}
+forecast(fit_ets, alc_test) %>%
+  autoplot(alc)
+```
+```{r}
+forecast(fit_ets, alc_test) %>%
+  filter(.model=='auto') %>%
+  autoplot(alc)
+```
+
+
+
+```{r}
+fit_ets %>% 
+  forecast(h = 10) %>% 
+  autoplot(alc)
+```
+
+```{r}
+fit_ets %>% 
+  forecast(h = 10) %>% 
+  filter(.model=='auto') %>%
+  autoplot(alc)
+```
+
+
+
+```{r}
+fitall <- alc_train %>%
+  model(
+    "ETS" = ETS(log(Sales)),
+    "ARIMA" = ARIMA(log(Sales)),
+    "Seasonal naïve" = SNAIVE(log(Sales)),
+    "Regression" = TSLM(log(Sales) ~ season() + GDP + CPI)  
+  )
+```
+
+```{r}
+fcall <- forecast(fitall, alc_test)
+```
+
+```{r}
+accuracy(fitall)
+```
+
+```{r}
+accuracy(fcall, alc)
+```
+
+```{r}
+alc %>%
+  autoplot(Sales) +
+  autolayer(fcall) +
+  labs(x = "Quarter",
+    title = "Forecasting Model Comparison",
+    y = "$ million"
+  )
+```
+
+> Regression model is best 
+
+```{r}
+fitall %>% select("Regression") %>% report()
+```
+
+
+
